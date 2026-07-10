@@ -85,10 +85,16 @@ app.post('/api/notify', async (req, res) => {
                 cleanNumber = '62' + cleanNumber.substring(1); // Auto-convert leading 0 to Indonesian 62
             }
             
-            const chatId = `${cleanNumber}@c.us`;
+            // Check if the number is registered on WhatsApp and get its exact ID
+            const numberDetails = await client.getNumberId(cleanNumber);
+            if (!numberDetails) {
+                console.error(`Number ${cleanNumber} is not registered on WhatsApp.`);
+                results.push({ number: cleanNumber, status: 'unregistered' });
+                continue;
+            }
             
-            // Dispatch the message
-            await client.sendMessage(chatId, message);
+            // Dispatch the message using the verified serialized ID
+            await client.sendMessage(numberDetails._serialized, message);
             results.push({ number: cleanNumber, status: 'sent' });
             console.log(`Sent WhatsApp notification to ${cleanNumber}`);
         }
