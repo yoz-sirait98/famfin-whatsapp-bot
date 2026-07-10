@@ -24,8 +24,23 @@ const client = new Client({
             '--no-first-run',
             '--no-zygote',
             '--disable-gpu',
-            '--disable-site-isolation-trials', // Massive memory saver for headless Chrome
-            '--js-flags="--max-old-space-size=256"' // Force aggressive garbage collection
+            '--disable-site-isolation-trials',
+            '--js-flags="--max-old-space-size=256"',
+            '--blink-settings=imagesEnabled=false', // Blocks all images and media
+            '--disable-extensions',
+            '--disable-background-networking',
+            '--disable-background-timer-throttling',
+            '--disable-client-side-phishing-detection',
+            '--disable-default-apps',
+            '--disable-hang-monitor',
+            '--disable-popup-blocking',
+            '--disable-prompt-on-repost',
+            '--disable-sync',
+            '--disable-translate',
+            '--metrics-recording-only',
+            '--no-default-browser-check',
+            '--password-store=basic',
+            '--use-mock-keychain'
         ]
     }
 });
