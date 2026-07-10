@@ -52,6 +52,18 @@ client.on('auth_failure', msg => {
     console.error('WhatsApp Bot authentication failure:', msg);
 });
 
+// Listen for incoming messages to reveal Group ID
+client.on('message', async msg => {
+    if (msg.body === '!groupinfo') {
+        const chat = await msg.getChat();
+        if (chat.isGroup) {
+            msg.reply(`WhatsApp Group ID:\n*${chat.id._serialized}*`);
+        } else {
+            msg.reply('This is not a group chat.');
+        }
+    }
+});
+
 async function startBot() {
     let retries = 5;
     while(retries > 0) {
@@ -83,16 +95,33 @@ app.post('/api/notify', async (req, res) => {
         return res.status(503).json({ error: 'WhatsApp client is not ready yet.' });
     }
 
-    const { numbers, message } = req.body;
+    const { numbers, groupId, message } = req.body;
 
-    if (!numbers || !Array.isArray(numbers) || numbers.length === 0 || !message) {
-        return res.status(400).json({ error: 'Invalid payload. "numbers" array and "message" string are required.' });
+    if (!message) {
+        return res.status(400).json({ error: 'Invalid payload. "message" is required.' });
+    }
+    if ((!numbers || numbers.length === 0) && !groupId) {
+        return res.status(400).json({ error: 'Must provide either "numbers" array or "groupId".' });
     }
 
     const results = [];
 
     try {
-        for (const number of numbers) {
+        // Send to Group if provided
+        if (groupId) {
+            try {
+                await client.sendMessage(groupId, message);
+                results.push({ groupId, status: 'sent' });
+                console.log(`Sent WhatsApp notification to Group: ${groupId}`);
+            } catch (err) {
+                console.error(`Failed to send to Group ${groupId}:`, err.message);
+                results.push({ groupId, status: 'error', error: err.message });
+            }
+        }
+
+        // Send to individual numbers if provided
+        if (numbers && Array.isArray(numbers)) {
+            for (const number of numbers) {
             // whatsapp-web.js requires numbers to be appended with '@c.us'
             // Ensure numbers are stripped of '+' or leading '0'
             let cleanNumber = number.toString().replace(/\D/g, ''); // Remove non-digits
@@ -114,9 +143,9 @@ app.post('/api/notify', async (req, res) => {
             console.log(`Sent WhatsApp notification to ${cleanNumber}`);
             
             // IMPORTANT: Wait 2 seconds before sending the next message
-            // This prevents WhatsApp from silently dropping messages due to rate-limiting
             await new Promise(resolve => setTimeout(resolve, 2000));
         }
+        } // End numbers loop
 
         return res.status(200).json({ success: true, results });
     } catch (error) {
