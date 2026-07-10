@@ -2,6 +2,7 @@ const express = require('express');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const cors = require('cors');
+const puppeteer = require('puppeteer');
 require('dotenv').config();
 
 const app = express();
@@ -13,6 +14,7 @@ app.use(express.json());
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
+        executablePath: puppeteer.executablePath(),
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] // Required for Heroku deployment
     }
 });
