@@ -52,9 +52,24 @@ client.on('auth_failure', msg => {
     console.error('WhatsApp Bot authentication failure:', msg);
 });
 
-client.initialize().catch(err => {
-    console.error('Initialization failed:', err);
-});
+async function startBot() {
+    let retries = 5;
+    while(retries > 0) {
+        try {
+            console.log(`Starting WhatsApp client... (Attempts left: ${retries})`);
+            await client.initialize();
+            break; // Success!
+        } catch (err) {
+            console.error('Initialization failed (Network error), retrying in 5 seconds...', err.message);
+            retries--;
+            if (retries === 0) {
+                console.error('CRITICAL: Failed to initialize WhatsApp bot after 5 attempts!');
+            }
+            await new Promise(resolve => setTimeout(resolve, 5000));
+        }
+    }
+}
+startBot();
 
 // Setup Express Endpoint for Supabase Webhook
 app.post('/api/notify', async (req, res) => {
