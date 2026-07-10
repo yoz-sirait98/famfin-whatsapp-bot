@@ -112,6 +112,10 @@ app.post('/api/notify', async (req, res) => {
             await client.sendMessage(numberDetails._serialized, message);
             results.push({ number: cleanNumber, status: 'sent' });
             console.log(`Sent WhatsApp notification to ${cleanNumber}`);
+            
+            // IMPORTANT: Wait 2 seconds before sending the next message
+            // This prevents WhatsApp from silently dropping messages due to rate-limiting
+            await new Promise(resolve => setTimeout(resolve, 2000));
         }
 
         return res.status(200).json({ success: true, results });
