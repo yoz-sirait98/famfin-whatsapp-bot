@@ -23,8 +23,9 @@ const client = new Client({
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--no-zygote',
-            '--single-process', // Critical for Heroku 512MB memory limit
-            '--disable-gpu'
+            '--disable-gpu',
+            '--disable-site-isolation-trials', // Massive memory saver for headless Chrome
+            '--js-flags="--max-old-space-size=256"' // Force aggressive garbage collection
         ]
     }
 });
