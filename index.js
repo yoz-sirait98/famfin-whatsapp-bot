@@ -13,9 +13,19 @@ app.use(express.json());
 // We use LocalAuth to save the session locally (creates a .wwebjs_auth folder)
 const client = new Client({
     authStrategy: new LocalAuth(),
+    authTimeoutMs: 120000, // Increase auth timeout to 2 minutes for slow Heroku starts
     puppeteer: {
         executablePath: puppeteer.executablePath(),
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] // Required for Heroku deployment
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox', 
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process', // Critical for Heroku 512MB memory limit
+            '--disable-gpu'
+        ]
     }
 });
 
@@ -40,7 +50,9 @@ client.on('auth_failure', msg => {
     console.error('WhatsApp Bot authentication failure:', msg);
 });
 
-client.initialize();
+client.initialize().catch(err => {
+    console.error('Initialization failed:', err);
+});
 
 // Setup Express Endpoint for Supabase Webhook
 app.post('/api/notify', async (req, res) => {
