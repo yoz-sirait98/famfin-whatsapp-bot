@@ -52,9 +52,9 @@ client.on('auth_failure', msg => {
     console.error('WhatsApp Bot authentication failure:', msg);
 });
 
-// Listen for incoming messages to reveal Group ID
-client.on('message', async msg => {
-    if (msg.body === '!groupinfo') {
+// Listen for incoming messages to reveal Group ID (fires for both incoming and outgoing)
+client.on('message_create', async msg => {
+    if (msg.body && msg.body.trim() === '!groupinfo') {
         const chat = await msg.getChat();
         if (chat.isGroup) {
             msg.reply(`WhatsApp Group ID:\n*${chat.id._serialized}*`);
