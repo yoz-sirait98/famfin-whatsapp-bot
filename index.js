@@ -21,6 +21,7 @@ const store = new PostgresStore({ pool });
 const client = new Client({
     authStrategy: new RemoteAuth({
         store: store,
+        dataPath: './', // Fix: wwebjs-postgres hardcodes the zip path to the root directory
         backupSyncIntervalMs: 300000 // Backup every 5 minutes
     }),
     authTimeoutMs: 120000, // Increase auth timeout to 2 minutes for slow Heroku starts
