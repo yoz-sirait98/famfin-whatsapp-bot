@@ -1,5 +1,7 @@
 const express = require('express');
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client, RemoteAuth } = require('whatsapp-web.js');
+const { PostgresStore } = require('wwebjs-postgres');
+const { Pool } = require('pg');
 const qrcode = require('qrcode-terminal');
 const cors = require('cors');
 const puppeteer = require('puppeteer');
@@ -10,9 +12,17 @@ app.use(cors());
 app.use(express.json());
 
 // Initialize WhatsApp Client
-// We use LocalAuth to save the session locally (creates a .wwebjs_auth folder)
+// We use RemoteAuth with wwebjs-postgres to save the session permanently in Supabase
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL
+});
+const store = new PostgresStore({ pool });
+
 const client = new Client({
-    authStrategy: new LocalAuth(),
+    authStrategy: new RemoteAuth({
+        store: store,
+        backupSyncIntervalMs: 300000 // Backup every 5 minutes
+    }),
     authTimeoutMs: 120000, // Increase auth timeout to 2 minutes for slow Heroku starts
     puppeteer: {
         executablePath: puppeteer.executablePath(),
