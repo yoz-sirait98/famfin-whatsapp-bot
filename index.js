@@ -34,10 +34,8 @@ const client = new Client({
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--no-zygote',
-            '--single-process', // Aggressive memory reduction
             '--disable-gpu',
             '--disable-site-isolation-trials',
-            '--js-flags="--max-old-space-size=128"', // Limit V8 memory to 128MB
             '--blink-settings=imagesEnabled=false'
         ]
     }
