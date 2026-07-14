@@ -33,9 +33,10 @@ const client = new Client({
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--no-zygote',
+            '--single-process', // Aggressive memory reduction
             '--disable-gpu',
             '--disable-site-isolation-trials',
-            '--js-flags="--max-old-space-size=256"',
+            '--js-flags="--max-old-space-size=128"', // Limit V8 memory to 128MB
             '--blink-settings=imagesEnabled=false'
         ]
     }
@@ -55,7 +56,11 @@ client.on('ready', () => {
 });
 
 client.on('authenticated', () => {
-    console.log('WhatsApp Bot authenticated successfully.');
+    console.log('WhatsApp Bot authenticated successfully. Waiting for remote save...');
+});
+
+client.on('remote_session_saved', () => {
+    console.log('✅ SUCCESS: Remote session saved to Supabase!');
 });
 
 client.on('auth_failure', msg => {
