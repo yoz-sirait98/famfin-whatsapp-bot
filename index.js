@@ -11,6 +11,7 @@ const { default: PQueue } = require('p-queue');
 require('dotenv').config();
 
 const app = express();
+app.set('trust proxy', 1); // Trust the first proxy (e.g. Heroku, Render, Railway) to get correct client IP for rate limiting
 app.use(cors());
 app.use(express.json());
 
