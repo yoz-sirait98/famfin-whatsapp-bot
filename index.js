@@ -5,11 +5,16 @@ const { Pool } = require('pg');
 const qrcode = require('qrcode-terminal');
 const cors = require('cors');
 const puppeteer = require('puppeteer');
+const crypto = require('crypto');
+const { rateLimit } = require('express-rate-limit');
+const { default: PQueue } = require('p-queue');
 require('dotenv').config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+const messageQueue = new PQueue({ concurrency: 1 });
 
 // Initialize WhatsApp Client
 // We use RemoteAuth with wwebjs-postgres to save the session permanently in Supabase
@@ -42,6 +47,13 @@ const client = new Client({
 });
 
 let isClientReady = false;
+
+client.on('disconnected', async (reason) => {
+    console.log('WhatsApp disconnected:', reason);
+    isClientReady = false;
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    startBot();
+});
 
 client.on('qr', (qr) => {
     // Generate and scan this code with your phone
@@ -97,12 +109,58 @@ async function startBot() {
 }
 startBot();
 
+// Utilities
+function normalizeNumber(number) {
+    let clean = number.toString().replace(/\D/g, '');
+    if (clean.startsWith('0')) {
+        clean = '62' + clean.substring(1);
+    }
+    return clean;
+}
+
+function timeout(ms) {
+    return new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Timeout")), ms)
+    );
+}
+
+// Health Check Endpoint
+app.get('/health', (req, res) => {
+    res.json({
+        status: 'ok',
+        ready: isClientReady,
+        uptime: process.uptime()
+    });
+});
+
+// Request Logging Middleware
+app.use('/api/notify', (req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+        const duration = ((Date.now() - start) / 1000).toFixed(2);
+        const numbersCount = req.body.numbers ? req.body.numbers.length : 0;
+        const groupId = req.body.groupId || '-';
+        console.log(`${new Date().toISOString()} | POST /api/notify | IP: ${req.ip} | Numbers: ${numbersCount} | Group: ${groupId} | Status: ${res.statusCode} | Duration: ${duration}s`);
+    });
+    next();
+});
+
+// Rate Limiter
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    limit: 100, // limit each IP to 100 requests per windowMs
+    message: { error: "Too many requests from this IP, please try again after 15 minutes" }
+});
+
 // Setup Express Endpoint for Supabase Webhook
-app.post('/api/notify', async (req, res) => {
-    // Basic API Key security check
-    const apiKey = req.headers['x-api-key'];
-    if (process.env.API_KEY && apiKey !== process.env.API_KEY) {
-        return res.status(401).json({ error: 'Unauthorized: Invalid API Key' });
+app.post('/api/notify', apiLimiter, async (req, res) => {
+    // Secure API Key security check
+    const apiKey = req.headers['x-api-key'] || '';
+    if (process.env.API_KEY) {
+        if (apiKey.length !== process.env.API_KEY.length || 
+            !crypto.timingSafeEqual(Buffer.from(apiKey), Buffer.from(process.env.API_KEY))) {
+            return res.status(401).json({ error: 'Unauthorized: Invalid API Key' });
+        }
     }
 
     if (!isClientReady) {
@@ -118,54 +176,53 @@ app.post('/api/notify', async (req, res) => {
         return res.status(400).json({ error: 'Must provide either "numbers" array or "groupId".' });
     }
 
-    const results = [];
-
-    try {
-        // Send to Group if provided
-        if (groupId) {
-            try {
-                await client.sendMessage(groupId, message);
-                results.push({ groupId, status: 'sent' });
-                console.log(`Sent WhatsApp notification to Group: ${groupId}`);
-            } catch (err) {
-                console.error(`Failed to send to Group ${groupId}:`, err.message);
-                results.push({ groupId, status: 'error', error: err.message });
+    // Queue background task
+    messageQueue.add(async () => {
+        try {
+            // Send to Group if provided
+            if (groupId) {
+                try {
+                    await client.sendMessage(groupId, message);
+                    console.log(`[Queue] Sent WhatsApp notification to Group: ${groupId}`);
+                } catch (err) {
+                    console.error(`[Queue] Failed to send to Group ${groupId}:`, err.message);
+                }
             }
+
+            // Send to individual numbers if provided
+            if (numbers && Array.isArray(numbers)) {
+                for (const number of numbers) {
+                    try {
+                        const cleanNumber = normalizeNumber(number);
+                        
+                        // Check if the number is registered on WhatsApp and get its exact ID with timeout
+                        const numberDetails = await Promise.race([
+                            client.getNumberId(cleanNumber),
+                            timeout(10000)
+                        ]);
+                        
+                        if (!numberDetails) {
+                            console.error(`[Queue] Number ${cleanNumber} is not registered on WhatsApp.`);
+                            continue;
+                        }
+                        
+                        // Dispatch the message using the verified serialized ID
+                        await client.sendMessage(numberDetails._serialized, message);
+                        console.log(`[Queue] Sent WhatsApp notification to ${cleanNumber}`);
+                    } catch (err) {
+                        console.error(`[Queue] Error sending to ${number}:`, err.message);
+                    } finally {
+                        // IMPORTANT: Wait 2 seconds before sending the next message
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('[Queue] Unhandled Error in message queue worker:', error);
         }
+    });
 
-        // Send to individual numbers if provided
-        if (numbers && Array.isArray(numbers)) {
-            for (const number of numbers) {
-            // whatsapp-web.js requires numbers to be appended with '@c.us'
-            // Ensure numbers are stripped of '+' or leading '0'
-            let cleanNumber = number.toString().replace(/\D/g, ''); // Remove non-digits
-            if (cleanNumber.startsWith('0')) {
-                cleanNumber = '62' + cleanNumber.substring(1); // Auto-convert leading 0 to Indonesian 62
-            }
-            
-            // Check if the number is registered on WhatsApp and get its exact ID
-            const numberDetails = await client.getNumberId(cleanNumber);
-            if (!numberDetails) {
-                console.error(`Number ${cleanNumber} is not registered on WhatsApp.`);
-                results.push({ number: cleanNumber, status: 'unregistered' });
-                continue;
-            }
-            
-            // Dispatch the message using the verified serialized ID
-            await client.sendMessage(numberDetails._serialized, message);
-            results.push({ number: cleanNumber, status: 'sent' });
-            console.log(`Sent WhatsApp notification to ${cleanNumber}`);
-            
-            // IMPORTANT: Wait 2 seconds before sending the next message
-            await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-        } // End numbers loop
-
-        return res.status(200).json({ success: true, results });
-    } catch (error) {
-        console.error('Error sending WhatsApp message:', error);
-        return res.status(500).json({ error: 'Failed to send messages', details: error.message });
-    }
+    return res.status(202).json({ success: true, message: 'Messages queued for sending' });
 });
 
 // Start Server
