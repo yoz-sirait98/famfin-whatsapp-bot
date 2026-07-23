@@ -8,7 +8,20 @@ const puppeteer = require('puppeteer');
 const crypto = require('crypto');
 const { rateLimit } = require('express-rate-limit');
 const { default: PQueue } = require('p-queue');
+const webpush = require('web-push');
 require('dotenv').config();
+
+// Configure VAPID keys for Web Push Notifications
+if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+  webpush.setVapidDetails(
+    process.env.VAPID_EMAIL || 'mailto:admin@famfin.app',
+    process.env.VAPID_PUBLIC_KEY,
+    process.env.VAPID_PRIVATE_KEY
+  );
+  console.log('Web Push VAPID keys configured.');
+} else {
+  console.warn('VAPID keys not set. /api/push endpoint will be unavailable.');
+}
 
 const app = express();
 app.set('trust proxy', 1); // Trust the first proxy (e.g. Heroku, Render, Railway) to get correct client IP for rate limiting
@@ -228,6 +241,44 @@ app.post('/api/notify', apiLimiter, async (req, res) => {
     });
 
     return res.status(202).json({ success: true, message: 'Messages queued for sending' });
+});
+
+// ===== PWA Web Push Notification Endpoint =====
+app.post('/api/push', apiLimiter, async (req, res) => {
+    // API Key security check (same as /api/notify)
+    const apiKey = req.headers['x-api-key'] || '';
+    if (process.env.API_KEY) {
+        if (apiKey.length !== process.env.API_KEY.length || 
+            !crypto.timingSafeEqual(Buffer.from(apiKey), Buffer.from(process.env.API_KEY))) {
+            return res.status(401).json({ error: 'Unauthorized: Invalid API Key' });
+        }
+    }
+
+    if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
+        return res.status(503).json({ error: 'VAPID keys not configured on server.' });
+    }
+
+    const { subscription, payload } = req.body;
+
+    if (!subscription || !subscription.endpoint || !subscription.keys) {
+        return res.status(400).json({ error: 'Missing subscription data (endpoint, keys.p256dh, keys.auth).' });
+    }
+
+    const pushPayload = JSON.stringify(payload || { title: 'FamFin', body: 'New notification' });
+
+    try {
+        await webpush.sendNotification(subscription, pushPayload);
+        console.log(`[WebPush] Sent push to ${subscription.endpoint.substring(0, 60)}...`);
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[WebPush] Send error:', err.statusCode, err.body || err.message);
+        if (err.statusCode === 410 || err.statusCode === 404) {
+            // Subscription expired — frontend should remove it from DB
+            res.status(410).json({ error: 'Subscription expired', expired: true });
+        } else {
+            res.status(500).json({ error: 'Push delivery failed', details: err.message });
+        }
+    }
 });
 
 // Start Server
