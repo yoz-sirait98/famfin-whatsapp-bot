@@ -15,6 +15,7 @@ import makeWASocket, {
     proto,
     BufferJSON,
 } from '@whiskeysockets/baileys';
+import QRCode from 'qrcode';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -152,6 +153,7 @@ async function usePostgresAuthState(sessionId) {
 
 let sock = null;
 let isClientReady = false;
+let currentQR = null; // Latest QR string — served via GET /qr
 
 async function connectToWhatsApp() {
     const { state, saveCreds } = await usePostgresAuthState(SESSION_ID);
@@ -161,7 +163,7 @@ async function connectToWhatsApp() {
     sock = makeWASocket({
         version,
         auth: state,
-        printQRInTerminal: true,   // Baileys prints QR natively — no qrcode-terminal needed
+        printQRInTerminal: false,  // Disabled — Heroku logs don't render block chars. Use GET /qr instead.
         browser: Browsers.ubuntu('Chrome'),
         logger,
         // Required callback for retry requests and poll vote decryption.
@@ -177,13 +179,15 @@ async function connectToWhatsApp() {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
-            // printQRInTerminal: true already handles display — just log a hint
-            console.log('QR Code ready! Scan with WhatsApp → Linked Devices.');
+            currentQR = qr;
+            // Can't render block-char QR in Heroku logs — expose via browser instead
+            console.log('QR Code ready! Open https://<your-app>.herokuapp.com/qr to scan.');
         }
 
         if (connection === 'open') {
             console.log('✅ WhatsApp Bot connected and ready!');
             isClientReady = true;
+            currentQR = null; // Clear QR once authenticated
         }
 
         if (connection === 'close') {
@@ -305,6 +309,86 @@ function requireApiKey(req, res, next) {
     }
     next();
 }
+
+// ─── QR Code Page ────────────────────────────────────────────────────────────
+// Serves an HTML page with the WhatsApp QR code as a scannable image.
+// This is the cloud-native approach — Heroku logs don't render block characters.
+//
+// Usage: open https://<your-app>.herokuapp.com/qr?key=YOUR_API_KEY in a browser
+
+app.get('/qr', async (req, res) => {
+    // Optional: protect with API key as query param for browser access
+    if (process.env.API_KEY) {
+        const provided = req.query.key || '';
+        const expected = process.env.API_KEY;
+        if (
+            provided.length !== expected.length ||
+            !crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected))
+        ) {
+            return res.status(401).send('<h2>401 — Missing or invalid ?key= param</h2>');
+        }
+    }
+
+    if (isClientReady) {
+        return res.send(`
+            <!DOCTYPE html><html><head><title>FamFin Bot</title></head>
+            <body style="font-family:sans-serif;text-align:center;padding:3rem">
+                <h1>✅ Bot is already connected!</h1>
+                <p>No QR scan needed. The bot is live and ready.</p>
+            </body></html>
+        `);
+    }
+
+    if (!currentQR) {
+        return res.send(`
+            <!DOCTYPE html><html><head><title>FamFin Bot — QR</title>
+            <meta http-equiv="refresh" content="5">
+            </head>
+            <body style="font-family:sans-serif;text-align:center;padding:3rem">
+                <h1>⏳ Waiting for QR code...</h1>
+                <p>The bot is starting up. This page will auto-refresh every 5 seconds.</p>
+            </body></html>
+        `);
+    }
+
+    try {
+        const qrDataUrl = await QRCode.toDataURL(currentQR, { width: 300, margin: 2 });
+        res.send(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>FamFin Bot — Scan QR</title>
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+                <style>
+                    body { font-family: sans-serif; text-align: center; padding: 2rem; background: #f9fafb; }
+                    h1 { color: #1a1a1a; }
+                    p  { color: #555; }
+                    img { border: 6px solid #25D366; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); }
+                    .steps { background: #fff; border-radius: 8px; padding: 1rem 2rem; display: inline-block; margin-top: 1rem; text-align: left; }
+                </style>
+            </head>
+            <body>
+                <h1>📱 Scan to connect FamFin Bot</h1>
+                <img src="${qrDataUrl}" alt="WhatsApp QR Code" />
+                <div class="steps">
+                    <b>How to scan:</b>
+                    <ol>
+                        <li>Open WhatsApp on your phone</li>
+                        <li>Go to <b>Settings → Linked Devices</b></li>
+                        <li>Tap <b>Link a Device</b></li>
+                        <li>Point your camera at the QR code above</li>
+                    </ol>
+                </div>
+                <p><small>⚠️ QR expires in ~60 seconds. Page auto-refreshes every 30s.</small></p>
+                <script>setTimeout(() => location.reload(), 30000);</script>
+            </body>
+            </html>
+        `);
+    } catch (err) {
+        console.error('[QR] Failed to generate QR image:', err.message);
+        res.status(500).send('<h2>Failed to generate QR code. Check logs.</h2>');
+    }
+});
 
 // ─── Health Check ─────────────────────────────────────────────────────────────
 
