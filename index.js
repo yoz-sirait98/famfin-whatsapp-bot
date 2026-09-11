@@ -74,11 +74,13 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 async function usePostgresAuthState(sessionId) {
     // Auto-create table if it doesn't exist (idempotent)
+    // TEXT column (not JSONB) — we own full serialization via BufferJSON to avoid
+    // PostgreSQL rejecting Signal protocol keys that contain JS Sets / typed arrays.
     await pool.query(`
         CREATE TABLE IF NOT EXISTS baileys_auth (
             session_id TEXT NOT NULL,
             key        TEXT NOT NULL,
-            value      JSONB,
+            value      TEXT,
             PRIMARY KEY (session_id, key)
         )
     `);
@@ -88,14 +90,15 @@ async function usePostgresAuthState(sessionId) {
             'SELECT value FROM baileys_auth WHERE session_id = $1 AND key = $2',
             [sessionId, key]
         );
-        if (!rows[0]) return null;
-        // Revive Buffers (Baileys stores binary keys that need special deserialization)
-        return JSON.parse(JSON.stringify(rows[0].value), BufferJSON.reviver);
+        if (!rows[0]?.value) return null;
+        // value is a raw JSON string (TEXT column) — deserialize with BufferJSON reviver
+        return JSON.parse(rows[0].value, BufferJSON.reviver);
     };
 
     const write = async (key, data) => {
-        // Replace Buffers with serializable form before storing as JSONB
-        const value = JSON.parse(JSON.stringify(data, BufferJSON.replacer));
+        // Serialize to JSON string with BufferJSON replacer (handles Buffers, typed arrays)
+        // Stored as TEXT so pg never attempts its own JSON parsing — avoids Set/Buffer issues
+        const value = JSON.stringify(data, BufferJSON.replacer);
         await pool.query(
             `INSERT INTO baileys_auth (session_id, key, value)
              VALUES ($1, $2, $3)
