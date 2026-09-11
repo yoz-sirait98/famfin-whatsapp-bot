@@ -22,13 +22,14 @@ import QRCode from 'qrcode';
 const { Pool } = pg;
 const SESSION_ID = process.env.SESSION_ID || 'famfin';
 
-// Silent logger — suppress Baileys' internal verbose output
+// Fully silent logger — Baileys' internal logs (especially the harmless
+// "failed to find key to decode mutation" app-state sync warnings on first
+// connection) are suppressed. Our own console.log statements provide all
+// the visibility needed.
 const logger = {
     level: 'silent',
     trace: () => {}, debug: () => {}, info: () => {},
-    warn: (m) => console.warn('[Baileys]', m),
-    error: (m) => console.error('[Baileys]', m),
-    fatal: (m) => console.error('[Baileys]', m),
+    warn:  () => {}, error: () => {}, fatal: () => {},
     child: function () { return this; },
 };
 
