@@ -1,28 +1,23 @@
 {
   "name": "famfin-whatsapp-bot",
-  "version": "1.0.0",
-  "description": "",
+  "version": "2.0.0",
+  "description": "FamFin WhatsApp Bot powered by Baileys (no Puppeteer)",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "heroku-postbuild": "npx puppeteer browsers install chrome"
+    "start": "node index.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "dependencies": {
-    "body-parser": "^2.3.0",
+    "@whiskeysockets/baileys": "latest",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "express-rate-limit": "^8.6.0",
-    "p-queue": "^6.6.2",
+    "p-queue": "^8.0.1",
     "pg": "^8.22.0",
-    "puppeteer": "^22.0.0",
-    "qrcode-terminal": "^0.12.0",
-    "web-push": "^3.6.7",
-    "whatsapp-web.js": "^1.34.7",
-    "wwebjs-postgres": "^1.0.0"
+    "web-push": "^3.6.7"
   }
 }
